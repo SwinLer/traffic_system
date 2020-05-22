@@ -37,6 +37,7 @@ warnings.filterwarnings('ignore')
 fontC = ImageFont.truetype("plate_detect/Font/platech.ttf", 14, 0)
 cars_run_line_1 = []
 cars_run_line_2 = []
+car_dic = {}
 
 class YOLO(object):
     def __init__(self):
@@ -53,6 +54,7 @@ class YOLO(object):
         self.boxes, self.scores, self.classes = self.generate()
                                                                              #881
         self.line = [(450,700), (1600, 720), (881, 261), (1200, 260)]
+        #self.line = [ (1600, 720),(450,700), (1200, 260), (881, 261) ]
         self.straight = True
         self.left = True
         self.right = True
@@ -203,32 +205,46 @@ class YOLO(object):
             cv2.imwrite("image/run_red_light/"+pstr+".jpg", grr)
         # cv2.imshow("image",grr)
         # cv2.waitKey(0)
-    #############################################################
+
+    def cross(self, p1, p2 , p3):
+        x1 = p2[0] - p1[0]
+        y1 = p2[1] - p1[1]
+        x2 = p3[0] - p1[0]
+        y2 = p3[1] - p1[1]
+        return x1*y2-x2*y1
+
+    def segment(self, p1, p2, p3, p4):
+        if(max(p1[0], p2[0]) >= min(p3[0], p4[0])\
+            and max(p3[0],p4[0]) >= min(p1[0],p2[0])\
+            and max(p1[1],p2[1]) >= min(p3[1],p4[1])\
+            and max(p3[1],p4[1]) >= min(p1[1],p2[1])):
+            if(self.cross(p1,p2,p3)*self.cross(p1,p2,p4)<=0\
+                and self.cross(p3,p4,p1)*self.cross(p3,p4,p2)<=0):
+                return True
+            else:
+                return False
+        else:
+            return False
 
     def intersection(self,line,top,left,bottom,right, num):
-        ax ,ay, px, py = float(line[num][0]), float(line[num][1]), float(line[num+1][0]), float(line[num+1][1])
-        x1, y1, x2, y2 = float(left), float(bottom), float(right), float(top)
-        sx = (y1 - ay) * (px - ax) / (py - ay) + ax
-        if sx >= x1 and sx <= x2:
-            return True
-        #判断矩形下边线和两点直线相交的点
-        xx = (y1 - ay) * (px - ax) / (py - ay) + ax
-        if sx >= x1 and sx <= x2:
-            return True
-        #判断矩形左边线和两点直线相交的点
-        zy = (y2 - ay) * (x2 - ax) / (px - ax) + ay
-        if zy >= y1 and zy <= y2:
-            return True
-        #判断矩形右边线和两点直线相交的点
-        yy = (y2 - ay) * (x2 - ax) / (px - ax) + ay
-        if yy <= y1 and yy >= y2:
-            return True
-        return False
+        if(line[num][0]>=left and line[num][1]>=top and line[num][0] <= right and line[num][1]<=bottom)or\
+        (line[num+1][0]>=left and line[num+1][1]>=top and line[num+1][0]<=right and line[num+1][1]<=bottom):
+              return True
+        else:
+            p1 = [left, top]
+            p2 = [right, bottom]
+            p3 = [right, top]
+            p4 = [left, bottom]
+            if self.segment(line[num],line[num+1],p1,p2) or self.segment(line[num],line[num+1],p3,p4):
+                return True
+            else:
+                return False
 
 
     def car_tracker(self, boxs, imgcv):
         global cars_run_line_1
         global cars_run_line_2
+        global car_dic
         features = encoder(imgcv,boxs)
         detections = [Detection(bbox, 1.0, feature) for
               bbox, feature in zip(boxs, features)]
@@ -256,10 +272,17 @@ class YOLO(object):
                 if str(track.track_id) not in cars_run_line_1:
                     print(str(track.track_id),"not in cars1:",cars_run_line_1)
                     cars_run_line_1.append(str(track.track_id))
-                if (str(track.track_id) in cars_run_line_1) and (str(track.track_id) in cars_run_line_2)and (str(track.track_id) == '2'):
-#                    cars.remove(str(track.track_id))
-                    cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
-                    self.visual_draw_position(cimg)
+                    if str(track.track_id) not in car_dic.keys():
+                        cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
+                        car_dic.update({str(track.track_id):cimg})
+                    
+                if (str(track.track_id) in cars_run_line_1) and (str(track.track_id) in cars_run_line_2):
+                    print("key:",str(track.track_id))
+                    self.visual_draw_position(car_dic[str(track.track_id)])
+                    cars_run_line_1.remove(str(track.track_id))
+                    cars_run_line_2.remove(str(track.track_id))
+#                    cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
+                    
                 cv2.rectangle(imgcv,
                               (int(bbox[0]), int(bbox[1])),
                               (int(bbox[2]), int(bbox[3])),
@@ -272,10 +295,17 @@ class YOLO(object):
                 if str(track.track_id) not in cars_run_line_2:
                     print(str(track.track_id), "not in cars2:",cars_run_line_2)
                     cars_run_line_2.append(str(track.track_id))
-                if (str(track.track_id) in cars_run_line_1) and (str(track.track_id) in cars_run_line_2) and (str(track.track_id) == '2'):
-#                    cars.remove(str(track.track_id))
-                    cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
-                    self.visual_draw_position(cimg)
+                    if str(track.track_id) not in car_dic.keys():
+                        cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
+                        car_dic.update({str(track.track_id):cimg})
+                    
+                if (str(track.track_id) in cars_run_line_1) and (str(track.track_id) in cars_run_line_2) :
+                    print("key:",str(track.track_id))
+                    self.visual_draw_position(car_dic[str(track.track_id)])
+                    cars_run_line_1.remove(str(track.track_id))
+                    cars_run_line_2.remove(str(track.track_id))
+#                    cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
+                    
                 cv2.rectangle(imgcv,
                               (int(bbox[0]), int(bbox[1])),
                               (int(bbox[2]), int(bbox[3])),
