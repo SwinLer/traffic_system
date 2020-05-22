@@ -1,101 +1,84 @@
+#! /usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Class definition of YOLO_v3 style detection model on image and video
+Run a YOLO_v3 style detection model on test images.
 """
-
+ 
 import colorsys
 import os
-from timeit import default_timer as timer
+import random
+import warnings
 import cv2
+import collections
+from timeit import default_timer as timer
+import time
 import numpy as np
 from keras import backend as K
 from keras.models import load_model
 from keras.layers import Input
+from keras.utils import multi_gpu_model
 from PIL import Image, ImageFont, ImageDraw
+from PIL import Image
+from PIL import ImageDraw
 
 from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
 from yolo3.utils import letterbox_image
-import os
-from keras.utils import multi_gpu_model
-import collections
 
-import sys
-from PIL import ImageFont
-from PIL import Image
-from PIL import ImageDraw
+from deep_sort import preprocessing
+from deep_sort import nn_matching
+from deep_sort.detection import Detection
+from deep_sort.tracker import Tracker
+from tools import generate_detections as gdet
+from deep_sort.detection import Detection as ddet
+
 import plate_detect.HyperLPRLite as pr
-import cv2
-import numpy as np
-import time
 
-#import car_detect.car_dection as cd
-
+warnings.filterwarnings('ignore') 
 fontC = ImageFont.truetype("plate_detect/Font/platech.ttf", 14, 0)
+cars_run_line_1 = []
+cars_run_line_2 = []
+
 class YOLO(object):
-    _defaults = {
-        "model_path": 'model_data/yolo.h5',
-        "anchors_path": 'model_data/yolo_anchors.txt',
-        "classes_path": 'model_data/coco_classes.txt',
-        "score" : 0.3,
-        "iou" : 0.35,
-        "model_image_size" : (416, 416),
-        "gpu_num" : 1,
-    }
-
-    @classmethod
-    def get_defaults(cls, n):
-        if n in cls._defaults:
-            return cls._defaults[n]
-        else:
-            return "Unrecognized attribute name '" + n + "'"
-
-    def __init__(self, **kwargs):
-        self.__dict__.update(self._defaults) # set up default values
-        self.__dict__.update(kwargs) # and update with user overrides
+    def __init__(self):
+        self.model_path = 'model_data/yolo.h5'
+        self.anchors_path = 'model_data/yolo_anchors.txt'
+        self.classes_path = 'model_data/coco_classes.txt'
+        self.score = 0.5
+        self.iou = 0.5
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
         self.sess = K.get_session()
+        self.model_image_size = (416, 416) # fixed size or (None, None)
+        self.is_fixed_size = self.model_image_size != (None, None)
         self.boxes, self.scores, self.classes = self.generate()
-        self.line = [(450,700), (1600, 720)]
+                                                                             #881
+        self.line = [(450,700), (1600, 720), (881, 261), (1200, 260)]
         self.straight = True
         self.left = True
         self.right = True
-
+ 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
         with open(classes_path) as f:
             class_names = f.readlines()
         class_names = [c.strip() for c in class_names]
         return class_names
-
+ 
     def _get_anchors(self):
         anchors_path = os.path.expanduser(self.anchors_path)
         with open(anchors_path) as f:
             anchors = f.readline()
-        anchors = [float(x) for x in anchors.split(',')]
-        return np.array(anchors).reshape(-1, 2)
-
+            anchors = [float(x) for x in anchors.split(',')]
+            anchors = np.array(anchors).reshape(-1, 2)
+        return anchors
+ 
     def generate(self):
         model_path = os.path.expanduser(self.model_path)
-        assert model_path.endswith('.h5'), 'Keras model or weights must be a .h5 file.'
-
-        # Load model, or construct model and load weights.
-        num_anchors = len(self.anchors)
-        num_classes = len(self.class_names)
-        is_tiny_version = num_anchors==6 # default setting
-        try:
-            self.yolo_model = load_model(model_path, compile=False)
-        except:
-            self.yolo_model = tiny_yolo_body(Input(shape=(None,None,3)), num_anchors//2, num_classes) \
-                if is_tiny_version else yolo_body(Input(shape=(None,None,3)), num_anchors//3, num_classes)
-            self.yolo_model.load_weights(self.model_path, by_name = True, skip_mismatch = True)
-        else:
-            assert self.yolo_model.layers[-1].output_shape[-1] == \
-                num_anchors/len(self.yolo_model.output) * (num_classes + 5), \
-                'Mismatch between model and given anchor and class sizes'
-
+        assert model_path.endswith('.h5'), 'Keras model must be a .h5 file.'
+ 
+        self.yolo_model = load_model(model_path, compile=False)
         print('{} model, anchors, and classes loaded.'.format(model_path))
-
+ 
         # Generate colors for drawing bounding boxes.
         hsv_tuples = [(x / len(self.class_names), 1., 1.)
                       for x in range(len(self.class_names))]
@@ -103,14 +86,12 @@ class YOLO(object):
         self.colors = list(
             map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)),
                 self.colors))
-        np.random.seed(10101)  # Fixed seed for consistent colors across runs.
-        np.random.shuffle(self.colors)  # Shuffle colors to decorrelate adjacent classes.
-        np.random.seed(None)  # Reset seed to default.
-
+        random.seed(10101)  # Fixed seed for consistent colors across runs.
+        random.shuffle(self.colors)  # Shuffle colors to decorrelate adjacent classes.
+        random.seed(None)  # Reset seed to default.
+ 
         # Generate output tensor targets for filtered bounding boxes.
         self.input_image_shape = K.placeholder(shape=(2, ))
-        if self.gpu_num>=2:
-            self.yolo_model = multi_gpu_model(self.yolo_model, gpus=self.gpu_num)
         boxes, scores, classes = yolo_eval(self.yolo_model.output, self.anchors,
                 len(self.class_names), self.input_image_shape,
                 score_threshold=self.score, iou_threshold=self.iou)
@@ -188,28 +169,162 @@ class YOLO(object):
                 type = d
         return type
 
+    def recognize_plate(self, image, smallest_confidence = 0.7):
+        # # grr = cv2.imread(image_path)
+
+        model = pr.LPR("plate_detect/model/cascade.xml", "plate_detect/model/model12.h5", "plate_detect/model/ocr_plate_all_gru.h5")
+        model.SimpleRecognizePlateByE2E(image)
+        return_all_plate = []
+        for pstr,confidence,rect in model.SimpleRecognizePlateByE2E(image):
+            if confidence>smallest_confidence:
+                return_all_plate.append([pstr,confidence,rect])
+        return return_all_plate
+
+    def drawRectBox(self,image,rect,addText):
+        cv2.rectangle(image, (int(rect[0]), int(rect[1])), (int(rect[0] + rect[2]), int(rect[1] + rect[3])), (0,0, 255), 2,cv2.LINE_AA)
+        cv2.rectangle(image, (int(rect[0]-1), int(rect[1])-16), (int(rect[0] + 115), int(rect[1])), (0, 0, 255), -1,
+                      cv2.LINE_AA)
+        img = Image.fromarray(image)
+        draw = ImageDraw.Draw(img)
+        draw.text((int(rect[0]+1), int(rect[1]-16)), addText.encode('utf-8').decode("utf-8"), (255, 255, 255), font=fontC)
+        imagex = np.array(img)
+        return imagex
+
+    def visual_draw_position(self,grr):
+        model = pr.LPR("plate_detect/model/cascade.xml","plate_detect/model/model12.h5","plate_detect/model/ocr_plate_all_gru.h5")
+        for pstr,confidence,rect in model.SimpleRecognizePlateByE2E(grr):
+            print(pstr)
+            if confidence>0.7:
+                grr = self.drawRectBox(grr, rect, pstr+" "+str(round(confidence,3)))
+                print("车牌号:")
+                print(pstr)
+                print("置信度")
+                print(confidence)
+            cv2.imwrite("image/run_red_light/"+pstr+".jpg", grr)
+        # cv2.imshow("image",grr)
+        # cv2.waitKey(0)
+    #############################################################
+
+    def intersection(self,line,top,left,bottom,right, num):
+        ax ,ay, px, py = float(line[num][0]), float(line[num][1]), float(line[num+1][0]), float(line[num+1][1])
+        x1, y1, x2, y2 = float(left), float(bottom), float(right), float(top)
+        sx = (y1 - ay) * (px - ax) / (py - ay) + ax
+        if sx >= x1 and sx <= x2:
+            return True
+        #判断矩形下边线和两点直线相交的点
+        xx = (y1 - ay) * (px - ax) / (py - ay) + ax
+        if sx >= x1 and sx <= x2:
+            return True
+        #判断矩形左边线和两点直线相交的点
+        zy = (y2 - ay) * (x2 - ax) / (px - ax) + ay
+        if zy >= y1 and zy <= y2:
+            return True
+        #判断矩形右边线和两点直线相交的点
+        yy = (y2 - ay) * (x2 - ax) / (px - ax) + ay
+        if yy <= y1 and yy >= y2:
+            return True
+        return False
 
 
-    def detect_image(self, image,path):
-        print('class',self._get_class())
+    def car_tracker(self, boxs, imgcv):
+        global cars_run_line_1
+        global cars_run_line_2
+        features = encoder(imgcv,boxs)
+        detections = [Detection(bbox, 1.0, feature) for
+              bbox, feature in zip(boxs, features)]
+        boxes = np.array([d.tlwh for d in detections])
+        scores = np.array([d.confidence for d in detections])
+        indices = preprocessing.non_max_suppression(boxes, nms_max_overlap, scores)
+        detections = [detections[i] for i in indices]
 
-        start = timer()
+        # Call the tracker
+        tracker.predict()
+        tracker.update(detections)
+        for track in tracker.tracks:
+            if not track.is_confirmed() or track.time_since_update > 1:
+                continue 
+            bbox = track.to_tlbr()
+            '''
+            cv2.rectangle(imgcv, 
+                                  (int(bbox[0]), int(bbox[1])), 
+                                  (int(bbox[2]), int(bbox[3])),
+                                  (255,255,255), 
+                                  2)
+                    '''
+                    
+            if self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 0):
+                if str(track.track_id) not in cars_run_line_1:
+                    print(str(track.track_id),"not in cars1:",cars_run_line_1)
+                    cars_run_line_1.append(str(track.track_id))
+                if (str(track.track_id) in cars_run_line_1) and (str(track.track_id) in cars_run_line_2)and (str(track.track_id) == '2'):
+#                    cars.remove(str(track.track_id))
+                    cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
+                    self.visual_draw_position(cimg)
+                cv2.rectangle(imgcv,
+                              (int(bbox[0]), int(bbox[1])),
+                              (int(bbox[2]), int(bbox[3])),
+                              (0,255,0),
+                              lineType=2, thickness=8)
 
-        if self.model_image_size != (None, None):
+                #cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
+                #self.visual_draw_position(cimg)            
+            elif self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 2):
+                if str(track.track_id) not in cars_run_line_2:
+                    print(str(track.track_id), "not in cars2:",cars_run_line_2)
+                    cars_run_line_2.append(str(track.track_id))
+                if (str(track.track_id) in cars_run_line_1) and (str(track.track_id) in cars_run_line_2) and (str(track.track_id) == '2'):
+#                    cars.remove(str(track.track_id))
+                    cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
+                    self.visual_draw_position(cimg)
+                cv2.rectangle(imgcv,
+                              (int(bbox[0]), int(bbox[1])),
+                              (int(bbox[2]), int(bbox[3])),
+                              (0,0,255),
+                              lineType=2, thickness=8)
+            else:
+                cv2.rectangle(imgcv,
+                              (int(bbox[0]), int(bbox[1])),
+                              (int(bbox[2]), int(bbox[3])),
+                              (255,255,255),
+                              2)                           
+            '''
+            cv2.rectangle(imgcv,
+                         (int(bbox[0]), int(bbox[1])),
+                         (int(bbox[2]), int(bbox[3])),
+                         (255, 255,255),
+                         2)
+            '''
+            cv2.putText(imgcv, 
+                        str(track.track_id),
+                        (int(bbox[0]), int(bbox[1])),
+                        0, 5e-3 * 200, (0,255,0),2)
+ 
+        for det in detections:
+            bbox = det.to_tlbr()
+            cv2.rectangle(imgcv,
+                          (int(bbox[0]), int(bbox[1])), 
+                          (int(bbox[2]), int(bbox[3])),
+                          (255,0,0), 
+                          2)
+
+
+    def detect_image(self, image, path):
+        if self.is_fixed_size:
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
             assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
-            boxed_image = letterbox_image(image, tuple(reversed(self.model_image_size)))
+            boxed_image = letterbox_image(
+                image, 
+                tuple(reversed(self.model_image_size)))
         else:
             new_image_size = (image.width - (image.width % 32),
                               image.height - (image.height % 32))
             boxed_image = letterbox_image(image, new_image_size)
         image_data = np.array(boxed_image, dtype='float32')
-
-        print(image_data.shape)
+ 
+        #print(image_data.shape)
         image_data /= 255.
         image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
-
-
+        
         out_boxes, out_scores, out_classes = self.sess.run(
             [self.boxes, self.scores, self.classes],
             feed_dict={
@@ -218,29 +333,24 @@ class YOLO(object):
                 K.learning_phase(): 0
             })
 
-        print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
-
         font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
                     size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
         thickness = (image.size[0] + image.size[1]) // 300
         thickness = 5
-        print('thickness',thickness)
-        print('out_classes',out_classes)
+
+        boxs = []
         my_class = ['traffic light', 'car']
         imgcv = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
-            print('predicted_class',predicted_class)
             if predicted_class not in my_class:
                 continue
             box = out_boxes[i]
-            score = out_scores[i]
+            score = out_scores[i]  
 
             label = '{} {:.2f}'.format(predicted_class, score)
-
             draw = ImageDraw.Draw(image)
-
             label_size = draw.textsize(label, font)
 
             top, left, bottom, right = box
@@ -248,10 +358,10 @@ class YOLO(object):
             left = max(0, np.floor(left + 0.5).astype('int32'))
             bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
             right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-            print(label, (left, top), (right, bottom))
             img2 = imgcv[top:bottom, left:right]
 
             cv2.line(imgcv,(self.line[0][0],self.line[0][1]), (self.line[1][0], self.line[1][1]),(255,0,0),5)
+            cv2.line(imgcv,(self.line[2][0],self.line[2][1]), (self.line[3][0], self.line[3][1]),(255,0,0),5)
 
             if predicted_class == 'traffic light':
                 color = self.get_color(img2)
@@ -278,160 +388,71 @@ class YOLO(object):
                                 cv2.FONT_HERSHEY_SIMPLEX,
                                 1.2, (0, 255, 0), 4,
                                 cv2.LINE_AA)
-                '''                
-                else:
-                    cv2.rectangle(imgcv, (left, top), (right, bottom), color=(255, 0, 0),
-                                  lineType=2, thickness=8)
-                    cv2.putText(imgcv, '{0} {1:.2f}'.format(color, score),
-                                (left, top - 15),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                1.2, (255, 0, 0), 4,
-                                cv2.LINE_AA)
-                print(imgcv.shape)
+            else:   # car
                 '''
-            else:      # car
-                cv2.imwrite('images/triffic/'+path+str(i) + '.jpg', img2)
-                if self.straight == False and self.intersection(self.line,top,left,bottom,right):
-                   cv2.rectangle(imgcv, (left, top), (right, bottom), color=(0, 0, 255),
+                run_red = self.intersection(self.line,top,left,bottom,right, 0) or self.intersection(self.line,top,left,bottom,right, 2)
+                if self.straight == False and run_red: # red light
+                    cv2.rectangle(imgcv, (left, top), (right, bottom), color=(0, 0, 255),
                                   lineType=2, thickness=8)
-                   cv2.putText(imgcv, '{0} {1:.2f}'.format(predicted_class, score),
+                    cv2.putText(imgcv, '{0} {1:.2f}'.format(predicted_class, score),
                                 (left, top - 15),
                                 cv2.FONT_HERSHEY_SIMPLEX,
                                 1.2, (0, 0, 255), 4,
                                 cv2.LINE_AA)
-                   cimg = imgcv[top:bottom,left:right]
-                   self.visual_draw_position(cimg)
-                   #model = pr.LPR("model/cascade.xml","model/model12.h5","model/ocr_plate_all_gru.h5")
-                   #for pstr,confidence,rect in model.SimpleRecognizePlateByE2E(cimg):
-                       #if confidence > 0.7:
-                           #cv2.rectangle(imgcv,(left, top), (right, bottom), color=(0, 0, 255),
-                                  #lineType=2, thickness=8)
-                           #grr = drawRectBox(cv2, rect, pstr+" "+str(round(confidence,3)))
-                    #cv2.imshow("violation",cimg)
-                    #cv2.waitKey(5)
-                    #cv2.imwrite("")
-                else:
-                    cv2.rectangle(imgcv, (left, top), (right, bottom), color=(255, 0, 0),
-                                  lineType=2, thickness=8)           
-                    cv2.putText(imgcv, '{0} {1:.2f}'.format(predicted_class, score),
-                                    (left, top - 15),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    1.2, (255, 0, 0), 4,
-                                    cv2.LINE_AA)
-                
+                 '''
+                #cimg = imgcv[top:bottom,left:right]
+                #self.visual_draw_position(cimg)              
+                image = Image.fromarray(imgcv)
+                x = int(box[1])
+                y = int(box[0])
+                w = int(box[3]-box[1])
+                h = int(box[2]-box[0])
+                if x < 0 :
+                    w = w + x
+                    x = 0
+                if y < 0 :
+                    h = h + y
+                    y = 0 
+                boxs.append([x,y,w,h])
+                #boxs = yolo.detect_image(image, 'pic')
 
-        end = timer()
-        print(end - start)
+            
+                #cv2.imshow('', imgcv)
+        self.car_tracker(boxs, imgcv)
         return imgcv
-
-            # if top - label_size[1] >= 0:
-            #     text_origin = np.array([left, top - label_size[1]])
-            # else:
-            #     text_origin = np.array([left, top + 1])
-            #
-            # # My kingdom for a good redistributable image drawing library.
-            # for j in range(thickness):
-            #     draw.rectangle(
-            #         [left + j, top + j, right - j, bottom - j],
-            #         outline=self.colors[c])
-            # draw.rectangle(
-            #     [tuple(text_origin), tuple(text_origin + label_size)],
-            #     fill=self.colors[c])
-            # draw.text(text_origin, label, fill=(0, 0, 0), font=font)
-            # del draw
-
-    def recognize_plate(image, smallest_confidence = 0.7):
-        # # grr = cv2.imread(image_path)
-
-        model = pr.LPR("plate_detect/model/cascade.xml", "plate_detect/model/model12.h5", "plate_detect/model/ocr_plate_all_gru.h5")
-        model.SimpleRecognizePlateByE2E(image)
-        return_all_plate = []
-        for pstr,confidence,rect in model.SimpleRecognizePlateByE2E(image):
-            if confidence>smallest_confidence:
-                return_all_plate.append([pstr,confidence,rect])
-        return return_all_plate
-
-    def drawRectBox(self,image,rect,addText):
-        cv2.rectangle(image, (int(rect[0]), int(rect[1])), (int(rect[0] + rect[2]), int(rect[1] + rect[3])), (0,0, 255), 2,cv2.LINE_AA)
-        cv2.rectangle(image, (int(rect[0]-1), int(rect[1])-16), (int(rect[0] + 115), int(rect[1])), (0, 0, 255), -1,
-                      cv2.LINE_AA)
-        img = Image.fromarray(image)
-        draw = ImageDraw.Draw(img)
-        draw.text((int(rect[0]+1), int(rect[1]-16)), addText.encode('utf-8').decode("utf-8"), (255, 255, 255), font=fontC)
-        imagex = np.array(img)
-        return imagex
-
-    def visual_draw_position(self,grr):
-        model = pr.LPR("plate_detect/model/cascade.xml","plate_detect/model/model12.h5","plate_detect/model/ocr_plate_all_gru.h5")
-        for pstr,confidence,rect in model.SimpleRecognizePlateByE2E(grr):
-            if confidence>0.7:
-                grr = self.drawRectBox(grr, rect, pstr+" "+str(round(confidence,3)))
-                print("车牌号:")
-                print(pstr)
-                print("置信度")
-                print(confidence)
-        cv2.imshow("image",grr)
-        cv2.waitKey(0)
-    #############################################################
-
-    def intersection(self,line,top,left,bottom,right):
-        ax ,ay, px, py = float(line[0][0]), float(line[0][1]), float(line[1][0]), float(line[1][1])
-        x1, y1, x2, y2 = float(left), float(bottom), float(right), float(top)
-        sx = (y1 - ay) * (px - ax) / (py - ay) + ax
-        if sx >= x1 and sx <= x2:
-            return True
-        #判断矩形下边线和两点直线相交的点
-        xx = (y1 - ay) * (px - ax) / (py - ay) + ax
-        if sx >= x1 and sx <= x2:
-            return True
-        #判断矩形左边线和两点直线相交的点
-        zy = (y2 - ay) * (x2 - ax) / (px - ax) + ay
-        if zy >= y1 and zy <= y2:
-            return True
-        #判断矩形右边线和两点直线相交的点
-        yy = (y2 - ay) * (x2 - ax) / (px - ax) + ay
-        if yy <= y1 and yy >= y2:
-            return True
-        return False
-        
-
-#################################################################
-
+ 
     def close_session(self):
         self.sess.close()
-
-
-
-def detect_img(yolo, img_path,fname):
-    img = Image.open(img_path)
-    import time
-    t1 = time.time()
-
-    img = yolo.detect_image(img,fname)
-    print('time: {}'.format(time.time() - t1))
-    return img
-    #yolo.close_session()
-
-
+ 
 
 if __name__ == '__main__':
-
     yolo = YOLO()
-    output = 'images/test2.avi'
-    video_full_path = 'images/test2.mp4'
+    output = 'image/output22.avi'
+    video_full_path = 'image/test2.mp4'
 
+   # 参数定义
+    max_cosine_distance = 0.3
+    nn_budget = None
+    nms_max_overlap = 1.0
+
+   # deep_sort 目标追踪算法 
+    model_filename = 'model_data/mars-small128.pb'
+    encoder = gdet.create_box_encoder(model_filename,batch_size=1)
+    
+    metric = nn_matching.NearestNeighborDistanceMetric(
+        		"cosine", max_cosine_distance, nn_budget)
+    tracker = Tracker(metric)
+ 
     cap = cv2.VideoCapture(video_full_path)
     cap.set(cv2.CAP_PROP_POS_FRAMES, 1)  # 设置要获取的帧号
 
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     fps = cap.get(cv2.CAP_PROP_FPS)
     size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-
     out = cv2.VideoWriter(output, fourcc, fps, size)
     ret = True
-    count = 0
+    frame_index = -1
     while ret :
-        count+=1
         ret, frame = cap.read()
         if not ret :
             print('结束')
@@ -443,5 +464,3 @@ if __name__ == '__main__':
     cap.release()
     out.release()
     cv2.destroyAllWindows()
-
-

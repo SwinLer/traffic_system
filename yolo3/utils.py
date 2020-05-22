@@ -19,16 +19,16 @@ def compose(*funcs):
 
 def letterbox_image(image, size):
     '''resize image with unchanged aspect ratio using padding'''
-    iw, ih = image.size
+    image_w, image_h = image.size
     w, h = size
-    scale = min(w/iw, h/ih)
-    nw = int(iw*scale)
-    nh = int(ih*scale)
+    new_w = int(image_w * min(w*1.0/image_w, h*1.0/image_h))
+    new_h = int(image_h * min(w*1.0/image_w, h*1.0/image_h))
+    resized_image = image.resize((new_w,new_h), Image.BICUBIC)
 
-    image = image.resize((nw,nh), Image.BICUBIC)
-    new_image = Image.new('RGB', size, (128,128,128))
-    new_image.paste(image, ((w-nw)//2, (h-nh)//2))
-    return new_image
+    boxed_image = Image.new('RGB', size, (128,128,128))
+    boxed_image.paste(resized_image, ((w-new_w)//2,(h-new_h)//2))
+    return boxed_image
+
 
 def rand(a=0, b=1):
     return np.random.rand()*(b-a) + a
