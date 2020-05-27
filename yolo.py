@@ -268,7 +268,7 @@ class YOLO(object):
                                   2)
                     '''
                     
-            if self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 0):
+            if self.straight==False and self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 0):
                 if str(track.track_id) not in cars_run_line_1:
                     print(str(track.track_id),"not in cars1:",cars_run_line_1)
                     cars_run_line_1.append(str(track.track_id))
@@ -291,7 +291,7 @@ class YOLO(object):
 
                 #cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
                 #self.visual_draw_position(cimg)            
-            elif self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 2):
+            elif self.straight==False and self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 2):
                 if str(track.track_id) not in cars_run_line_2:
                     print(str(track.track_id), "not in cars2:",cars_run_line_2)
                     cars_run_line_2.append(str(track.track_id))
@@ -457,7 +457,7 @@ class YOLO(object):
 
 if __name__ == '__main__':
     yolo = YOLO()
-    output = 'image/output22.avi'
+    output = 'image/output222.avi'
     video_full_path = 'image/test2.mp4'
 
    # 参数定义
