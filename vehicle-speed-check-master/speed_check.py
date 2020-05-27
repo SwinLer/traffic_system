@@ -29,10 +29,12 @@ HEIGHT = 720
 def estimateSpeed(location1, location2):
 	d_pixels = math.sqrt(math.pow(location2[0] - location1[0], 2) + math.pow(location2[1] - location1[1], 2))
 	# ppm = location2[2] / carWidht
-	ppm = 4.8
+#	ppm = 4.8
+	ppm = 7
 	d_meters = d_pixels / ppm
 	#print("d_pixels=" + str(d_pixels), "d_meters=" + str(d_meters))
-	fps = 18
+	fps = video.get(cv2.CAP_PROP_FPS)
+#	fps = 18
 	speed = d_meters * fps * 3.6
 	return speed
 	
@@ -50,7 +52,7 @@ def trackMultipleObjects(yolo):
 	speed = [None] * 1000
 	
 	# Write output to video file
-	out = cv2.VideoWriter('image/out22.avi',cv2.VideoWriter_fourcc('M','J','P','G'), 10, (WIDTH,HEIGHT))
+	out = cv2.VideoWriter('image/out222.avi',cv2.VideoWriter_fourcc('M','J','P','G'), 10, (WIDTH,HEIGHT))
 
 
 	while True:
