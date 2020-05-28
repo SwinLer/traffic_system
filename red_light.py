@@ -58,6 +58,10 @@ class YOLO(object):
         self.straight = True
         self.left = True
         self.right = True
+        self.max_cosine_distance = 0.3
+        self.nn_budget = None
+        self.nms_max_overlap = 1.0
+
  
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -98,6 +102,14 @@ class YOLO(object):
                 len(self.class_names), self.input_image_shape,
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
+
+
+    def set_line(self, lines):
+        self.line[0] = lines[0]
+        self.line[1] = lines[1]
+        self.line[2] = lines[2]
+        self.line[3] = lines[3]
+
 
     def getColorList(self):
         dict = collections.defaultdict(list)
@@ -241,7 +253,7 @@ class YOLO(object):
                 return False
 
 
-    def car_tracker(self, boxs, imgcv):
+    def car_tracker(self, boxs, imgcv, encoder, tracker):
         global cars_run_line_1
         global cars_run_line_2
         global car_dic
@@ -250,7 +262,7 @@ class YOLO(object):
               bbox, feature in zip(boxs, features)]
         boxes = np.array([d.tlwh for d in detections])
         scores = np.array([d.confidence for d in detections])
-        indices = preprocessing.non_max_suppression(boxes, nms_max_overlap, scores)
+        indices = preprocessing.non_max_suppression(boxes, self.nms_max_overlap, scores)
         detections = [detections[i] for i in indices]
 
         # Call the tracker
@@ -338,7 +350,7 @@ class YOLO(object):
                           2)
 
 
-    def detect_image(self, image, path):
+    def detect_image(self, image, path, encoder, tracker):
         if self.is_fixed_size:
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
             assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
@@ -448,13 +460,13 @@ class YOLO(object):
 
             
                 #cv2.imshow('', imgcv)
-        self.car_tracker(boxs, imgcv)
+        self.car_tracker(boxs, imgcv, encoder, tracker)
         return imgcv
  
     def close_session(self):
         self.sess.close()
  
-
+'''
 if __name__ == '__main__':
     yolo = YOLO()
     output = 'image/output222.avi'
@@ -489,8 +501,10 @@ if __name__ == '__main__':
             break
         image = Image.fromarray(cv2.cvtColor(frame,cv2.COLOR_BGR2RGB))
         image = yolo.detect_image(image,'pic')
+        cv2.imshow('result', image)
         out.write(image)
 
     cap.release()
     out.release()
     cv2.destroyAllWindows()
+'''
