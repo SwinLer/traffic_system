@@ -215,7 +215,7 @@ class YOLO(object):
                 print("置信度")
                 print(confidence)
             cv2.imwrite("image/run_red_light/"+pstr+".jpg", grr)
-        # cv2.imshow("image",grr)
+        cv2.imshow("illegal vehicle", grr)
         # cv2.waitKey(0)
 
     def cross(self, p1, p2 , p3):
@@ -303,7 +303,7 @@ class YOLO(object):
 
                 #cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
                 #self.visual_draw_position(cimg)            
-            elif self.straight==False and self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 2):
+            elif  self.straight==False and self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 2):
                 if str(track.track_id) not in cars_run_line_2:
                     print(str(track.track_id), "not in cars2:",cars_run_line_2)
                     cars_run_line_2.append(str(track.track_id))
@@ -329,13 +329,7 @@ class YOLO(object):
                               (int(bbox[2]), int(bbox[3])),
                               (255,255,255),
                               2)                           
-            '''
-            cv2.rectangle(imgcv,
-                         (int(bbox[0]), int(bbox[1])),
-                         (int(bbox[2]), int(bbox[3])),
-                         (255, 255,255),
-                         2)
-            '''
+
             cv2.putText(imgcv, 
                         str(track.track_id),
                         (int(bbox[0]), int(bbox[1])),
@@ -408,8 +402,7 @@ class YOLO(object):
             if predicted_class == 'traffic light':
                 color = self.get_color(img2)
                 cv2.imwrite('images/triffic/'+path+str(i) + '.jpg', img2)
-                if color== 'red' or color == 'red2':
-                    ####################################################
+                if color == 'red2':
                     self.straight = False
 
                     cv2.rectangle(imgcv, (left, top), (right, bottom), color=(0, 0, 255),
@@ -419,7 +412,7 @@ class YOLO(object):
                                 cv2.FONT_HERSHEY_SIMPLEX,
                                 1.2, (0, 0, 255), 4,
                                 cv2.LINE_AA)
-                    #self.car_process(imgcv)
+
                 elif color == 'green':
                     self.straight = True
 
@@ -431,19 +424,7 @@ class YOLO(object):
                                 1.2, (0, 255, 0), 4,
                                 cv2.LINE_AA)
             else:   # car
-                '''
-                run_red = self.intersection(self.line,top,left,bottom,right, 0) or self.intersection(self.line,top,left,bottom,right, 2)
-                if self.straight == False and run_red: # red light
-                    cv2.rectangle(imgcv, (left, top), (right, bottom), color=(0, 0, 255),
-                                  lineType=2, thickness=8)
-                    cv2.putText(imgcv, '{0} {1:.2f}'.format(predicted_class, score),
-                                (left, top - 15),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                1.2, (0, 0, 255), 4,
-                                cv2.LINE_AA)
-                 '''
-                #cimg = imgcv[top:bottom,left:right]
-                #self.visual_draw_position(cimg)              
+    
                 image = Image.fromarray(imgcv)
                 x = int(box[1])
                 y = int(box[0])
@@ -462,49 +443,43 @@ class YOLO(object):
                 #cv2.imshow('', imgcv)
         self.car_tracker(boxs, imgcv, encoder, tracker)
         return imgcv
+
+    
+    def init_data(self, video_src):
+        output = 'image/redlight_output.avi'
+        # 目标追踪
+        model_filename = 'model_data/mars-small128.pb'
+        encoder = gdet.create_box_encoder(model_filename,batch_size=1)
+        metric = nn_matching.NearestNeighborDistanceMetric(
+            		"cosine", self.max_cosine_distance, self.nn_budget)
+        tracker = Tracker(metric)
+
+        cap = cv2.VideoCapture(video_src)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        out = cv2.VideoWriter(output, fourcc, fps, size)
+        ret = True
+        frame_index = -1
+        while ret :
+            ret, frame = cap.read()
+            if not ret :
+                print('结束')
+                break
+            image = Image.fromarray(cv2.cvtColor(frame,cv2.COLOR_BGR2RGB))
+            image = self.detect_image(image,'pic', encoder, tracker)
+            cv2.imshow('result', image)
+            out.write(image)
+            if cv2.waitKey(33) == 27:
+                break
+
+        cap.release()
+        out.release()
+
  
     def close_session(self):
         self.sess.close()
  
-'''
-if __name__ == '__main__':
-    yolo = YOLO()
-    output = 'image/output222.avi'
-    video_full_path = 'image/test2.mp4'
-
-   # 参数定义
-    max_cosine_distance = 0.3
-    nn_budget = None
-    nms_max_overlap = 1.0
-
-   # deep_sort 目标追踪算法 
-    model_filename = 'model_data/mars-small128.pb'
-    encoder = gdet.create_box_encoder(model_filename,batch_size=1)
-    
-    metric = nn_matching.NearestNeighborDistanceMetric(
-        		"cosine", max_cosine_distance, nn_budget)
-    tracker = Tracker(metric)
- 
-    cap = cv2.VideoCapture(video_full_path)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 1)  # 设置要获取的帧号
-
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    out = cv2.VideoWriter(output, fourcc, fps, size)
-    ret = True
-    frame_index = -1
-    while ret :
-        ret, frame = cap.read()
-        if not ret :
-            print('结束')
-            break
-        image = Image.fromarray(cv2.cvtColor(frame,cv2.COLOR_BGR2RGB))
-        image = yolo.detect_image(image,'pic')
-        cv2.imshow('result', image)
-        out.write(image)
-
-    cap.release()
-    out.release()
-    cv2.destroyAllWindows()
-'''
