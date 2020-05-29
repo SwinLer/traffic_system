@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Run a YOLO_v3 style detection model on test images.
+Check vehicles running red lights
 """
  
 import colorsys
@@ -40,6 +40,7 @@ cars_run_line_2 = []
 car_dic = {}
 
 class YOLO(object):
+
     def __init__(self):
         self.model_path = 'model_data/yolo.h5'
         self.anchors_path = 'model_data/yolo_anchors.txt'
@@ -49,12 +50,10 @@ class YOLO(object):
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
         self.sess = K.get_session()
-        self.model_image_size = (416, 416) # fixed size or (None, None)
+        self.model_image_size = (416, 416)  # fixed size or (None, None)
         self.is_fixed_size = self.model_image_size != (None, None)
         self.boxes, self.scores, self.classes = self.generate()
-                                                                             #881
         self.line = [(450,700), (1600, 720), (881, 261), (1200, 260)]
-        #self.line = [ (1600, 720),(450,700), (1200, 260), (881, 261) ]
         self.straight = True
         self.left = True
         self.right = True
@@ -62,7 +61,6 @@ class YOLO(object):
         self.nn_budget = None
         self.nms_max_overlap = 1.0
 
- 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
         with open(classes_path) as f:
@@ -103,18 +101,16 @@ class YOLO(object):
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
 
-
     def set_line(self, lines):
         self.line[0] = lines[0]
         self.line[1] = lines[1]
         self.line[2] = lines[2]
         self.line[3] = lines[3]
 
-
     def getColorList(self):
         dict = collections.defaultdict(list)
 
-        # 红色
+        # hsv value of red
         lower_red = np.array([156, 43, 46])
         upper_red = np.array([180, 255, 255])
         color_list = []
@@ -122,7 +118,7 @@ class YOLO(object):
         color_list.append(upper_red)
         dict['red'] = color_list
 
-        # 红色2
+        # hsv value of red2
         lower_red = np.array([0, 43, 46])
         upper_red = np.array([10, 255, 255])
         color_list = []
@@ -130,7 +126,7 @@ class YOLO(object):
         color_list.append(upper_red)
         dict['red2'] = color_list
 
-        # 橙色
+        # hsv value of orange
         lower_orange = np.array([11, 43, 46])
         upper_orange = np.array([25, 255, 255])
         color_list = []
@@ -138,7 +134,7 @@ class YOLO(object):
         color_list.append(upper_orange)
         dict['orange'] = color_list
 
-        # 黄色
+        # hsv value of yello
         lower_yellow = np.array([26, 43, 46])
         upper_yellow = np.array([34, 255, 255])
         color_list = []
@@ -146,7 +142,7 @@ class YOLO(object):
         color_list.append(upper_yellow)
         dict['yellow'] = color_list
 
-        # 绿色
+        # hsv value of green
         lower_green = np.array([35, 43, 46])
         upper_green = np.array([77, 255, 255])
         color_list = []
@@ -165,8 +161,6 @@ class YOLO(object):
         type = 'black'
         for d in color_dict:
             mask = cv2.inRange(hsv, color_dict[d][0], color_dict[d][1])
-            # print(cv2.inRange(hsv, color_dict[d][0], color_dict[d][1]))
-            #cv2.imwrite('images/triffic/' + f + d + '.jpg', mask)
             binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
             binary = cv2.dilate(binary, None, iterations=2)
             #img, cnts, hiera = cv2.findContours(binary.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -252,7 +246,6 @@ class YOLO(object):
             else:
                 return False
 
-
     def car_tracker(self, boxs, imgcv, encoder, tracker):
         global cars_run_line_1
         global cars_run_line_2
@@ -272,13 +265,6 @@ class YOLO(object):
             if not track.is_confirmed() or track.time_since_update > 1:
                 continue 
             bbox = track.to_tlbr()
-            '''
-            cv2.rectangle(imgcv, 
-                                  (int(bbox[0]), int(bbox[1])), 
-                                  (int(bbox[2]), int(bbox[3])),
-                                  (255,255,255), 
-                                  2)
-                    '''
                     
             if self.straight==False and self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 0):
                 if str(track.track_id) not in cars_run_line_1:
@@ -293,16 +279,13 @@ class YOLO(object):
                     self.visual_draw_position(car_dic[str(track.track_id)])
                     cars_run_line_1.remove(str(track.track_id))
                     cars_run_line_2.remove(str(track.track_id))
-#                    cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
                     
                 cv2.rectangle(imgcv,
                               (int(bbox[0]), int(bbox[1])),
                               (int(bbox[2]), int(bbox[3])),
                               (0,255,0),
                               lineType=2, thickness=8)
-
-                #cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
-                #self.visual_draw_position(cimg)            
+         
             elif  self.straight==False and self.intersection(self.line,int(bbox[1]),int(bbox[0]),int(bbox[3]),int(bbox[2]), 2):
                 if str(track.track_id) not in cars_run_line_2:
                     print(str(track.track_id), "not in cars2:",cars_run_line_2)
@@ -316,7 +299,6 @@ class YOLO(object):
                     self.visual_draw_position(car_dic[str(track.track_id)])
                     cars_run_line_1.remove(str(track.track_id))
                     cars_run_line_2.remove(str(track.track_id))
-#                    cimg = imgcv[int(bbox[1]):int(bbox[3]),int(bbox[0]):int(bbox[2])]
                     
                 cv2.rectangle(imgcv,
                               (int(bbox[0]), int(bbox[1])),
@@ -342,7 +324,6 @@ class YOLO(object):
                           (int(bbox[2]), int(bbox[3])),
                           (255,0,0), 
                           2)
-
 
     def detect_image(self, image, path, encoder, tracker):
         if self.is_fixed_size:
@@ -424,7 +405,6 @@ class YOLO(object):
                                 1.2, (0, 255, 0), 4,
                                 cv2.LINE_AA)
             else:   # car
-    
                 image = Image.fromarray(imgcv)
                 x = int(box[1])
                 y = int(box[0])
@@ -437,17 +417,13 @@ class YOLO(object):
                     h = h + y
                     y = 0 
                 boxs.append([x,y,w,h])
-                #boxs = yolo.detect_image(image, 'pic')
 
-            
-                #cv2.imshow('', imgcv)
         self.car_tracker(boxs, imgcv, encoder, tracker)
         return imgcv
 
-    
     def init_data(self, video_src):
         output = 'image/redlight_output.avi'
-        # 目标追踪
+        # target tracking
         model_filename = 'model_data/mars-small128.pb'
         encoder = gdet.create_box_encoder(model_filename,batch_size=1)
         metric = nn_matching.NearestNeighborDistanceMetric(
@@ -479,7 +455,6 @@ class YOLO(object):
         cap.release()
         out.release()
 
- 
     def close_session(self):
         self.sess.close()
  

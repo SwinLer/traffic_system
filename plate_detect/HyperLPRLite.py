@@ -1,4 +1,4 @@
-#coding=utf-8
+# -*- coding: utf-8 -*-
 import cv2
 import numpy as np
 from keras import backend as K
@@ -12,6 +12,7 @@ chars = [u"京", u"沪", u"津", u"渝", u"冀", u"晋", u"蒙", u"辽", u"吉",
              ]
 
 class LPR():
+    
     def __init__(self,model_detection,model_finemapping,model_seq_rec):
         self.watch_cascade = cv2.CascadeClassifier(model_detection)
         self.modelFineMapping = self.model_finemapping()

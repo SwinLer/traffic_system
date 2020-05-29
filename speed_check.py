@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+'''
+Check speed of vehicles
+'''
+
 import cv2
 import dlib
 import time
@@ -19,7 +24,6 @@ from PIL import ImageDraw
 from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
 from yolo3.utils import letterbox_image
 
-#carCascade = cv2.CascadeClassifier('myhaar.xml')
 video = cv2.VideoCapture('image/test2.mp4')
 
 WIDTH = 1280
@@ -29,12 +33,10 @@ HEIGHT = 720
 def estimateSpeed(location1, location2):
 	d_pixels = math.sqrt(math.pow(location2[0] - location1[0], 2) + math.pow(location2[1] - location1[1], 2))
 	# ppm = location2[2] / carWidht
-#	ppm = 4.8
+    # ppm = 4.8
 	ppm = 7
 	d_meters = d_pixels / ppm
-	#print("d_pixels=" + str(d_pixels), "d_meters=" + str(d_meters))
 	fps = video.get(cv2.CAP_PROP_FPS)
-#	fps = 18
 	speed = d_meters * fps * 3.6
 	return speed
 	
@@ -53,7 +55,6 @@ def trackMultipleObjects(yolo):
 	
 	# Write output to video file
 	out = cv2.VideoWriter('image/speed_output.avi',cv2.VideoWriter_fourcc('M','J','P','G'), 10, (WIDTH,HEIGHT))
-
 
 	while True:
 		start_time = time.time()
@@ -87,7 +88,6 @@ def trackMultipleObjects(yolo):
 
 			img = Image.fromarray(gray)
 			cars = yolo.detect_image(img, 'pic')
-#			cars = carCascade.detectMultiScale(gray, 1.1, 13, 18, (24, 24))
 			
 			for (_x, _y, _w, _h) in cars:
 				x = int(_x)
@@ -124,9 +124,6 @@ def trackMultipleObjects(yolo):
 					carLocation1[currentCarID] = [x, y, w, h]
 
 					currentCarID = currentCarID + 1
-		
-		#cv2.line(resultImage,(0,480),(1280,480),(255,0,0),5)
-
 
 		for carID in carTracker.keys():
 			trackedPosition = carTracker[carID].get_position()
@@ -145,47 +142,33 @@ def trackMultipleObjects(yolo):
 		
 		if not (end_time == start_time):
 			fps = 1.0/(end_time - start_time)
-		
-		#cv2.putText(resultImage, 'FPS: ' + str(int(fps)), (620, 30),cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
-
 
 		for i in carLocation1.keys():	
 			if frameCounter % 1 == 0:
 				[x1, y1, w1, h1] = carLocation1[i]
 				[x2, y2, w2, h2] = carLocation2[i]
 		
-				# print 'previous location: ' + str(carLocation1[i]) + ', current location: ' + str(carLocation2[i])
 				carLocation1[i] = [x2, y2, w2, h2]
 		
-				# print 'new previous location: ' + str(carLocation1[i])
 				if [x1, y1, w1, h1] != [x2, y2, w2, h2]:
 					if (speed[i] == None or speed[i] == 0) and y1 >= 275 and y1 <= 285:
 						speed[i] = estimateSpeed([x1, y1, w1, h1], [x2, y2, w2, h2])
 
-					#if y1 > 275 and y1 < 285:
 					if speed[i] != None and y1 >= 180:
 						cv2.putText(resultImage, str(int(speed[i])) + " km/hr", (int(x1 + w1/2), int(y1-5)),cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 3)
-					
-					#print ('CarID ' + str(i) + ': speed is ' + str("%.2f" % round(speed[i], 0)) + ' km/h.\n')
 
-					#else:
-					#	cv2.putText(resultImage, "Far Object", (int(x1 + w1/2), int(y1)),cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-						#print ('CarID ' + str(i) + ' Location1: ' + str(carLocation1[i]) + ' Location2: ' + str(carLocation2[i]) + ' speed is ' + str("%.2f" % round(speed[i], 0)) + ' km/h.\n')
 		cv2.imshow('result', resultImage)
-		# Write the frame into the file 'output.avi'
 		out.write(resultImage)
-
 
 		if cv2.waitKey(33) == 27:
 			break
 
 	out.release()
 	video.release()
-#	cv2.destroyAllWindows()
 
 
 class YOLO(object):
+
     def __init__(self):
         self.model_path = 'model_data/yolo.h5'
         self.anchors_path = 'model_data/yolo_anchors.txt'
@@ -198,12 +181,6 @@ class YOLO(object):
         self.model_image_size = (416, 416) # fixed size or (None, None)
         self.is_fixed_size = self.model_image_size != (None, None)
         self.boxes, self.scores, self.classes = self.generate()
-                                                                             #881
-        self.line = [(450,700), (1600, 720), (881, 261), (1200, 260)]
-        #self.line = [ (1600, 720),(450,700), (1200, 260), (881, 261) ]
-        self.straight = True
-        self.left = True
-        self.right = True
  
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -245,8 +222,6 @@ class YOLO(object):
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
 
-
-
     def detect_image(self, image, path):
         if self.is_fixed_size:
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
@@ -260,7 +235,6 @@ class YOLO(object):
             boxed_image = letterbox_image(image, new_image_size)
         image_data = np.array(boxed_image, dtype='float32')
  
-        #print(image_data.shape)
         image_data /= 255.
         image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
         
@@ -299,9 +273,6 @@ class YOLO(object):
             right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
             img2 = imgcv[top:bottom, left:right]
 
-            cv2.line(imgcv,(self.line[0][0],self.line[0][1]), (self.line[1][0], self.line[1][1]),(255,0,0),5)
-            cv2.line(imgcv,(self.line[2][0],self.line[2][1]), (self.line[3][0], self.line[3][1]),(255,0,0),5)
-
             if predicted_class in my_class:
                 image = Image.fromarray(imgcv)
                 x = int(box[1])
@@ -314,10 +285,10 @@ class YOLO(object):
                 if y < 0 :
                     h = h + y
                     y = 0 
-#                return [x,y,w,h]
+
                 boxs.append([x,y,w,h])
         return boxs
-#                self.trackMultipleObjects([x,y,w,h])
+
 
 # test
 '''
